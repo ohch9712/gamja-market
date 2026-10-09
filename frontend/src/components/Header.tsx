@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthMenu } from "@/features/auth/components/AuthMenu";
 
 export function Header() {
   return (
@@ -8,7 +9,8 @@ export function Header() {
           <span className="brand-mark" aria-hidden="true">🥔</span>
           <span>감자마켓</span>
         </Link>
-        <nav aria-label="주 메뉴">
+        <nav aria-label="주 메뉴" className="header-nav">
+          <AuthMenu />
           <Link href="/requests/new" className="button button-primary header-cta">
             <span className="header-cta-plus" aria-hidden="true">＋</span>
             구매요청 올리기

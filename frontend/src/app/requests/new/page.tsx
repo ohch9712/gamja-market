@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { RequireAuth } from "@/features/auth/components/RequireAuth";
 import { RequestForm } from "@/features/purchase-requests/components/RequestForm";
 
 export const metadata: Metadata = { title: "구매요청 올리기" };
@@ -11,7 +12,9 @@ export default function NewRequestPage() {
         <Link href="/" className="back-link">← 목록으로 돌아가기</Link>
         <div className="page-intro"><span className="eyebrow">NEW REQUEST</span><h1>찾는 물건을 알려주세요</h1><p>원하는 조건을 적으면, 이웃에게 보여줄 구매요청이 준비돼요.</p></div>
         <div className="form-layout">
-          <RequestForm />
+          <RequireAuth>
+            <RequestForm />
+          </RequireAuth>
           <aside className="form-aside">
             <div className="aside-potato" aria-hidden="true">🥔</div>
             <span className="aside-kicker">좋은 요청을 위한 팁</span>
