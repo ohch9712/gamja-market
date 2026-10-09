@@ -44,7 +44,7 @@
 | --- | --- | --- |
 | 백엔드 프레임워크 | FastAPI + uvicorn, 패키지 관리 uv | AGENTS.md. `requires-python = ">=3.12"` |
 | ORM | SQLAlchemy 2.0 (동기 엔진, `psycopg[binary]` 3 드라이버) | 비동기 ORM은 학습 난이도를 올리므로 동기로 간다. FastAPI는 동기 엔드포인트를 스레드풀에서 실행하므로 충분하다 |
-| 마이그레이션 | Alembic | `uv run alembic upgrade head`로 스키마 적용(테스트도 같은 스키마 사용) |
+| 마이그레이션 | Alembic | `uv run alembic upgrade head`로 스키마 적용. 접속 URL은 `MIGRATION_DATABASE_URL`(비어 있으면 `DATABASE_URL`). 테스트도 같은 스키마 사용 |
 | 설정 로딩 | pydantic-settings (`.env` 읽기) | |
 | 비밀번호 해시 | **argon2id** (`argon2-cffi`, 라이브러리 기본 파라미터) | bcrypt의 72바이트 제한과 passlib 유지보수 중단을 피한다. 해시 문자열에 파라미터가 포함돼 추후 파라미터 변경 시 재해시가 쉽다 |
 | 인증 방식 | **서버 세션 + HttpOnly 쿠키** (세션 테이블 `sessions`) | 요구사항 "로그아웃이 실제로 무효화되어야 함"을 충족하려면 서버 상태가 필요하다. JWT는 만료 전 무효화를 위해 블랙리스트를 따로 둬야 하므로 세션 테이블보다 복잡하다. 쿠키는 HttpOnly라 JS에서 토큰을 만질 일이 없다 |
@@ -85,7 +85,8 @@ Dev DB는 `compose.yaml`의 Postgres 17이다. 접속 URL: `postgresql+psycopg:/
 
 ### 4.3 마이그레이션
 
-- Alembic 리비전 1개: `0001_create_users_and_sessions`. `upgrade`는 두 테이블·인덱스 생성, `downgrade`는 역순 삭제.
+- `0001_create_users_and_sessions`: `upgrade`는 두 테이블·인덱스 생성, `downgrade`는 역순 삭제.
+- `0002_enable_row_level_security`: `alembic_version`, `users`, `sessions`에 RLS를 켜고 정책은 만들지 않는다. Supabase는 `public` 스키마를 Data API(anon/authenticated 역할)로 노출하므로 이를 막는다. 테이블 소유자인 백엔드 접속 계정은 RLS를 우회하므로 앱 동작은 그대로다.
 - `gen_random_uuid()`는 Postgres 13+ 내장이므로 확장 설치가 필요 없다.
 
 ## 5. API 계약
@@ -245,8 +246,10 @@ backend/
   ├── .gitignore                # .env, .venv/, __pycache__/, logs/*, !logs/.gitkeep
   ├── alembic.ini
   ├── alembic/
-  │    ├── env.py               # app.core.config의 DATABASE_URL 사용, target_metadata = Base.metadata
-  │    └── versions/0001_create_users_and_sessions.py
+  │    ├── env.py               # app.core.config의 MIGRATION_DATABASE_URL(없으면 DATABASE_URL) 사용, target_metadata = Base.metadata
+  │    └── versions/
+  │         ├── 0001_create_users_and_sessions.py
+  │         └── 0002_enable_row_level_security.py
   ├── app/
   │    ├── main.py              # create_app(): CORS, 예외 핸들러, 라우터 등록
   │    ├── api/
@@ -287,6 +290,8 @@ backend/
 # 로컬 개발 기본값. 비밀값 아님. 실제 값은 .env(gitignore)에 둔다.
 APP_ENV=development
 DATABASE_URL=postgresql+psycopg://gamja:gamja_local_password@localhost:5432/gamja_market
+# 마이그레이션(Alembic) 전용. 비우면 DATABASE_URL을 사용한다.
+MIGRATION_DATABASE_URL=postgresql+psycopg://gamja:gamja_local_password@localhost:5432/gamja_market
 FRONTEND_ORIGIN=http://localhost:3000
 SESSION_COOKIE_NAME=gamja_session
 SESSION_TTL_SECONDS=604800
@@ -529,4 +534,5 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run test && npm run build
 ## 11. 다음 단계 연결 포인트
 
 - **3단계(구매요청 API)**: `get_current_user` 의존성을 그대로 써서 `POST /api/purchase-requests`를 보호하고, `buyer_id`를 `users.id`로 저장한다. 프론트는 `apiFetch`로 `features/purchase-requests/api.ts`를 교체하고, `buyerNickname` 표시를 사용자 이메일(또는 3단계에서 정하는 표시 규칙)로 바꾼다.
-- **운영 전환 시**: `DATABASE_URL`을 Supabase Postgres로, `FRONTEND_ORIGIN`을 Vercel 도메인으로, `COOKIE_SECURE=true`로 바꾼다. 프론트와 백엔드 도메인이 달라 cross-site가 되면 `SameSite=None; Secure` 또는 Next.js rewrites 프록시가 필요하다. 이 결정은 배포 단계에서 한다.
+- **운영 전환 시**: `DATABASE_URL`을 Supabase Postgres(앱용 접속)로, `MIGRATION_DATABASE_URL`을 DDL 권한이 있는 Supabase 직접 접속(direct connection)으로, `FRONTEND_ORIGIN`을 Vercel 도메인으로, `COOKIE_SECURE=true`로 바꾼다. 프론트와 백엔드 도메인이 달라 cross-site가 되면 `SameSite=None; Secure` 또는 Next.js rewrites 프록시가 필요하다. 이 결정은 배포 단계에서 한다.
+  - 적용 결과: 루트 `vercel.json`의 Vercel Services로 프론트와 백엔드를 한 도메인에 배포하고 `/api/*`를 백엔드로 보낸다(same-origin이라 `SameSite=Lax` 유지). 함수 리전은 Supabase(ap-northeast-2)와 같은 서울 `icn1`로 고정한다(`"regions": ["icn1"]`). 프론트는 `NEXT_PUBLIC_API_BASE_URL=/`로 상대 경로를 호출한다. Supabase 직접 접속 호스트는 IPv6 전용이라 Vercel에서 접속할 수 없으므로 `DATABASE_URL`은 Supavisor 세션 pooler(IPv4, 5432)를 쓴다. 로컬에서 운영 DB에 마이그레이션할 때도 같은 pooler 주소를 `.env`를 고치지 않고 `MIGRATION_DATABASE_URL=... uv run alembic upgrade head`로 넘긴다.

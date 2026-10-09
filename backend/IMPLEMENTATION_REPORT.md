@@ -14,6 +14,8 @@
 - `gamja_session` HttpOnly/SameSite=Lax/Path=/ 쿠키와 환경변수에 따른 Secure 설정을 적용한다.
 - `http://localhost:3000`의 credential CORS, 공통 JSON 에러 핸들러, JSON 가입·로그인 본문 제한을 적용한다. 거절된 CORS 프리플라이트도 JSON 에러를 반환하며 500에도 허용된 origin의 CORS 헤더를 보존한다.
 - `users`, `sessions`, FK cascade 및 인덱스를 생성·삭제하는 초기 마이그레이션을 추가했다.
+- Supabase Data API 노출을 막기 위해 `alembic_version`, `users`, `sessions`에 RLS를 켜는 `0002` 마이그레이션을 추가했다(정책 없음, 테이블 소유자인 백엔드 계정은 영향 없음).
+- Alembic은 `MIGRATION_DATABASE_URL`(비어 있으면 `DATABASE_URL`)로 접속한다.
 - 테스트는 `DATABASE_URL` DB(사전에 `alembic upgrade head` 적용)를 사용하고, 테스트마다 savepoint와 외부 트랜잭션을 롤백해 데이터를 남기지 않는다.
 
 ## 실행 결과
@@ -22,7 +24,7 @@
 | --- | --- |
 | 루트에서 `docker compose up -d` | PostgreSQL 컨테이너 실행 확인 |
 | `backend/`에서 `uv sync` | 성공, Python 3.12.13 가상환경 및 `uv.lock` 생성 |
-| `uv run alembic upgrade head` | `0001_create_users_and_sessions` 적용 성공 |
+| `uv run alembic upgrade head` | `0001_create_users_and_sessions`, `0002_enable_row_level_security` 적용 성공 |
 | `uv run alembic check` | 모델·마이그레이션 차이 없음 |
 | `uv run pytest -q` | **50 passed**, 문서 9.1 전체 항목 포함 |
 | `uv run uvicorn app.main:app --port 8000` | 서버 기동 성공, 검증 후 SIGINT로 정상 종료 확인 |
@@ -55,6 +57,7 @@ backend/alembic.ini
 backend/alembic/env.py
 backend/alembic/script.py.mako
 backend/alembic/versions/0001_create_users_and_sessions.py
+backend/alembic/versions/0002_enable_row_level_security.py
 backend/app/__init__.py
 backend/app/main.py
 backend/app/api/__init__.py
