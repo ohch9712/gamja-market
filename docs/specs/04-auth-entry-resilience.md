@@ -129,9 +129,16 @@ DB 스키마와 마이그레이션은 바꾸지 않는다.
 | 10-12 23:27 | `9f2b322` push → preview `dpl_HbePP4ZM4qVePTxh1NBBPJrN42vL` READY | 검증 워커 PASS: SSR HTML에 `data-auth-status="loading"`과 링크가 있다. 회원가입 201 → 로그아웃 204 → 로그인 200 → 새로고침 후 `/me` 200. 콘솔 에러 0건 |
 | 10-12 23:31 | `vercel promote` → production 재빌드 `dpl_CxrtU1www7KJwBYiXdESWeuRYJdT` | **장애**: 빌드 직전(23:32:06)에 바뀐 `DATABASE_URL`(`postgresql://`)을 가져가 `/api/*` 전체가 500(원인 #5). 헤더 SSR 링크는 정상이었다 |
 | 10-12 23:36 | `vercel rollback dpl_8zj7tPfMMbZ1B7vKVBF6f81eBTFN` | `/api/health` 200, `/api/auth/me` 401로 복구. 장애는 약 3분간 이어졌다 |
-| (이후) | DB URL 정규화 커밋 → 새 preview 검증 → production 반영 | 아래에 덧붙인다 |
+| 10-12 23:39 | `806b7f5`(DB URL 정규화) push → preview `dpl_6a8iidD48idJ6vHQ8WYSNF8hdphc` READY | 새 `DATABASE_URL`(23:32:06 변경)로 빌드됐다. 직접 확인: `/api/health` 200, `/me` 401, 없는 계정 로그인 401 `INVALID_CREDENTIALS`(pooler 경유 DB 조회 성공). 검증 워커 PASS 18/18: 회원가입 201 → 로그아웃 204 → 로그인 200 → 새로고침 후 `/me` 200 |
+| 10-12 23:49 | promote 직전 확인 → `vercel promote` → production 재빌드 `dpl_3ir3VXiScNbcNdmnQPAndftq43Vg` READY | `DATABASE_URL`의 updatedAt이 preview 생성 시각보다 앞선다(그 사이 바뀌지 않음). 롤백 뒤에는 production 도메인 자동 할당이 꺼져 있어 새 배포가 도메인을 받지 못했다 → 같은 배포를 `vercel promote`로 한 번 더 승격해 `gamja-market-virid.vercel.app`에 연결했다(재빌드 없음) |
+| 10-12 23:51 | production 직접 확인 | SSR 헤더에 `data-auth-status="loading"`과 링크가 있다. `/api/health` 200, `/me` 401, `/login`·`/signup` 200. 테스트 계정으로 회원가입 201 → `/me` 200 → 로그아웃 204 → 로그인 200 |
+| 10-12 23:52 | 검증 워커 production 최종 검증 | PASS 18/18. 새 테스트 계정으로 SSR·첫 snapshot 헤더 링크, 회원가입 201 → 로그아웃 204 → 로그인 200 → 새로고침 후 `/me` 200, `/requests/new` 접근, 콘솔 0건, `/me` 401 외 4xx/5xx 0건 |
 
-교훈: promote는 production 환경변수로 **다시 빌드**하므로, preview 검증 뒤에 환경변수가 바뀌면 검증하지 않은 값으로 배포된다. promote 직후에는 반드시 `/api/health`를 확인하고, 롤백할 배포 ID를 미리 적어 둔다.
+교훈:
+
+- promote는 production 환경변수로 **다시 빌드**한다. preview 검증 뒤에 환경변수가 바뀌면 검증하지 않은 값으로 배포된다. promote 직전에 env의 updatedAt과 preview 생성 시각을 비교하고, promote 직후에는 반드시 `/api/health`를 확인한다. 롤백할 배포 ID는 미리 적어 둔다.
+- 환경변수는 새 배포에만 반영된다. 이미 만들어진 배포(롤백 대상 포함)는 빌드할 때의 값을 그대로 쓴다.
+- `vercel rollback`을 하면 production 도메인 자동 할당이 꺼진다. 그 뒤에 만든 production 배포는 `vercel promote <배포 ID>`로 승격해야 도메인이 연결된다.
 
 ## 7. 남은 일
 
