@@ -65,3 +65,30 @@ def test_engine_passes_connect_timeout_to_driver() -> None:
 
 def test_connect_timeout_defaults_to_five_seconds() -> None:
     assert Settings(_env_file=None).db_connect_timeout_seconds == 5
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://postgres.ref:secret@pooler.example.com:5432/postgres",
+        "postgres://postgres.ref:secret@pooler.example.com:5432/postgres",
+        " postgresql://postgres.ref:secret@pooler.example.com:5432/postgres\n",
+    ],
+)
+def test_driverless_database_url_uses_psycopg(url: str) -> None:
+    # 드라이버가 없는 URL을 그대로 쓰면 SQLAlchemy가 설치되지 않은 psycopg2를 import하다 앱 전체가 실패한다.
+    settings = Settings(_env_file=None, database_url=url, migration_database_url=url)
+    expected = "postgresql+psycopg://postgres.ref:secret@pooler.example.com:5432/postgres"
+    assert settings.database_url == expected
+    assert settings.alembic_database_url == expected
+    engine = create_db_engine(settings)
+    try:
+        assert engine.dialect.driver == "psycopg"
+    finally:
+        engine.dispose()
+
+
+def test_database_url_with_explicit_driver_is_kept() -> None:
+    url = "postgresql+psycopg://gamja:secret@localhost:5432/gamja"
+    assert Settings(_env_file=None, database_url=url).database_url == url
+    assert Settings(_env_file=None, database_url=url).migration_database_url is None

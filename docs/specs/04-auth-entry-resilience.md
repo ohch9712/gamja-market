@@ -9,7 +9,7 @@
 
 | 확인 항목 | 결과 |
 | --- | --- |
-| 헤더 진입점 | 로그인 상태 확인이 끝난 뒤 "로그인"/"회원가입" 링크가 보인다 (Orca 브라우저 snapshot) |
+| 헤더 진입점 | 로그인 상태 확인이 끝난 뒤에는 "로그인"/"회원가입" 링크가 보인다 (Orca 브라우저 snapshot). 하지만 서버 렌더 HTML(확인 전 상태)에는 링크가 없고 빈 placeholder만 있다 |
 | `/login`, `/signup` | 200 |
 | `/api/health` | 200 `{"status":"ok"}` |
 | `/api/auth/me` (쿠키 없음) | 401 `UNAUTHENTICATED` (공통 JSON 에러 포맷) |
@@ -38,6 +38,28 @@
 | 2 | 프런트 요청에 타임아웃이 없다 | `apiFetch`가 `fetch`를 그대로 호출했다 | 백엔드가 응답하지 않으면(cold start, DB 대기, 함수 hang) `loading`이 끝나지 않는다. Vercel 함수 최대 실행 시간은 300초다 |
 | 3 | DB 접속 타임아웃이 없다 | `create_engine(database_url, pool_pre_ping=True)`에 `connect_timeout`이 없었다. psycopg 기본값은 무제한이다 | Supabase 일시 정지나 네트워크 장애가 나면 로그인·회원가입·쿠키가 있는 `/me` 요청이 TCP 타임아웃(수십 초~수 분)까지 매달린다 → 2와 겹쳐 진입점이 사라진다 |
 | 4 | production 외 URL은 SSO로 보호된다 | 1절 표 | 팀/브랜치/배포 URL을 열면 감자마켓 대신 Vercel 로그인 화면이 나온다. 설정으로 의도된 동작이며 코드 수정 대상이 아니다 |
+| 5 | 드라이버 없는 DB URL을 그대로 쓴다 | 2026-10-12 23:32 KST에 `DATABASE_URL`이 Supabase Session pooler 문자열(`postgresql://…pooler.supabase.com:5432/…`)로 바뀌었다. 이 값으로 빌드한 배포는 SQLAlchemy가 psycopg2 dialect를 골라 `ModuleNotFoundError: No module named 'psycopg2'`를 내고 `app/main.py` import부터 실패한다 → `/api/*` 전체가 500(`FUNCTION_INVOCATION_FAILED`). 6절의 실제 장애로 확인했다 | 이 값으로 다시 배포하면(main push 포함) 회원가입·로그인이 전부 실패한다 |
+
+### 2.1 production 배포 이력 (KST)
+
+| 시각 | 배포 | 커밋 | 내용 |
+| --- | --- | --- | --- |
+| 2026-10-09 23:53 | `dpl_BdU7sTbmYPC2mUUtAqnijvp1MBVd` (production) | `main@0c553b6` | 프런트 목업만 있다. `backend/`와 `vercel.json`이 없고 헤더에 `AuthMenu`도 없다 → 인증 UI·API가 아예 없다 |
+| 2026-10-10 02:51 / 03:08 | 환경변수 | — | `DATABASE_URL`, `NEXT_PUBLIC_API_BASE_URL`, `COOKIE_SECURE`, `FRONTEND_ORIGIN`(production 전용) 추가 |
+| 2026-10-10 03:21 | `dpl_8zj7tPfMMbZ1B7vKVBF6f81eBTFN` (production) | `main@e65bd46` | 회원가입 기능(`1e2ac9a`)과 `vercel.json`(frontend + backend 서비스)이 처음 함께 배포됐다. 수정 전 마지막 production 배포다 |
+| 2026-10-12 22:53 / 23:03 | preview | `fdb15c6`, `develop@4f60bb2` | 스크립트 추가. 인증 코드는 바뀌지 않았다 |
+
+`1e2ac9a`만 따로 배포된 적은 없다. 따라서 "frontend만 배포돼 `/api/auth/*`가 404였던 상태"는 production에 없었다.
+
+### 2.2 확정 원인과 추정 원인
+
+| 구분 | 내용 | 근거 |
+| --- | --- | --- |
+| **확정(코드 결함)** | 헤더의 로그인·회원가입 진입점이 `/api/auth/me` 응답 전에는 없고, 요청·DB 접속에 타임아웃이 없어 응답이 늦거나 매달리면 계속 없다 | production SSR HTML의 `<nav>`에 `auth-menu-placeholder`와 "구매요청 올리기"만 있고 `/login`·`/signup` 링크가 없다(검증 워커 기준선 증거 `08-baseline-ssr-home.html`). 원인 표 #1~#3 |
+| **확정(배포 이력)** | 2026-10-09 23:53 ~ 10-10 03:21 KST에는 production이 인증 기능이 없는 목업(`0c553b6`)이었다 | 2.1 표 |
+| **추정** | 사용자가 그 시간대에 production을 봤거나, 백엔드 cold start나 DB 지연 때문에 헤더 진입점이 비어 있는 순간을 봤다 | 사용자가 접속한 정확한 URL과 시각은 확인하지 못했다. 런타임 로그는 Hobby 플랜에서 1시간만 보관된다 |
+| **추정** | 팀/브랜치/배포 URL로 접속해 Vercel 로그인 화면만 봤다 | 해당 URL은 SSO 302로 확인했다(원인 #4). 실제로 그 URL로 접속했는지는 확인하지 못했다 |
+| **배제** | frontend만 배포돼 인증 API가 404였다 | 2.1 표 |
 
 참고: 쿠키가 없는 `/api/auth/me`는 이미 DB 없이 바로 401을 반환한다. SQLAlchemy `Session`은 실제 쿼리가 실행될 때 연결을 얻는데, `get_current_user`가 토큰이 없으면 쿼리 전에 예외를 던지기 때문이다. 이번에 이 동작이 유지되는지 확인하는 회귀 테스트를 추가했다.
 
@@ -69,6 +91,7 @@
 | 파일 | 변경 |
 | --- | --- |
 | `app/core/config.py` | `db_connect_timeout_seconds: int = 5` (환경변수 `DB_CONNECT_TIMEOUT_SECONDS`, 값은 0보다 커야 한다). 기본값이 있으므로 Vercel 환경변수를 바꿀 필요는 없다 |
+| `app/core/config.py` | `database_url`·`migration_database_url`의 앞뒤 공백을 제거하고, `postgresql://`·`postgres://`로 시작하면 `postgresql+psycopg://`로 바꾼다(드라이버를 명시한 URL은 그대로 둔다). Supabase 대시보드 문자열을 그대로 붙여 넣어도 동작하므로 환경변수를 고칠 필요가 없다 |
 | `app/db/session.py` | 엔진 생성을 `create_db_engine(settings)`로 분리하고 `connect_args={"connect_timeout": …}`를 넘긴다 |
 | `.env.example` | `DB_CONNECT_TIMEOUT_SECONDS=5` 예시 추가 |
 
@@ -82,9 +105,11 @@ DB 스키마와 마이그레이션은 바꾸지 않는다.
   - `AuthProvider`: 타임아웃이 나면 `unauthenticated` + `backendAvailable=false`
   - `LoginForm`: 타임아웃이 나면 지연 안내를 띄우고 다시 제출할 수 있다
   - `eslint`, `tsc --noEmit`, `next build` 통과
-- 백엔드(pytest, 로컬 Docker Postgres, 54개 통과): `tests/test_resilience.py`
+- 백엔드(pytest, 로컬 Docker Postgres, 58개 통과): `tests/test_resilience.py`
   - 쿠키 없는 `/api/auth/me`와 `/api/health`가 DB 세션에 손대지 않는다(속성에 접근하면 실패하는 가짜 세션 사용)
   - 엔진이 드라이버에 `connect_timeout`을 넘기고, 기본값은 5초다
+  - `postgresql://`, `postgres://`, 앞뒤 공백이 있는 URL을 `postgresql+psycopg://`로 바꾸고 엔진 드라이버가 `psycopg`다. 드라이버를 명시한 URL은 그대로 둔다
+- 수동 확인: `DATABASE_URL=postgresql://…localhost…`로 앱을 import하면 driver=psycopg, `/api/health` 200, `/api/auth/me` 401, 로그인 시도 401(DB 조회 정상)
 - 수동 확인: 응답하지 않는 주소(`10.255.255.1`)에 `connect_timeout=3`으로 접속하면 3.0초 뒤 `OperationalError`가 난다
 - 마이그레이션(`alembic upgrade`)은 실행하지 않았다(`MIGRATION_DATABASE_URL`이 운영 Supabase를 가리킨다).
 
@@ -99,7 +124,14 @@ DB 스키마와 마이그레이션은 바꾸지 않는다.
 
 ## 6. 배포 결과
 
-(배포 후 기록)
+| 시각(KST) | 단계 | 결과 |
+| --- | --- | --- |
+| 10-12 23:27 | `9f2b322` push → preview `dpl_HbePP4ZM4qVePTxh1NBBPJrN42vL` READY | 검증 워커 PASS: SSR HTML에 `data-auth-status="loading"`과 링크가 있다. 회원가입 201 → 로그아웃 204 → 로그인 200 → 새로고침 후 `/me` 200. 콘솔 에러 0건 |
+| 10-12 23:31 | `vercel promote` → production 재빌드 `dpl_CxrtU1www7KJwBYiXdESWeuRYJdT` | **장애**: 빌드 직전(23:32:06)에 바뀐 `DATABASE_URL`(`postgresql://`)을 가져가 `/api/*` 전체가 500(원인 #5). 헤더 SSR 링크는 정상이었다 |
+| 10-12 23:36 | `vercel rollback dpl_8zj7tPfMMbZ1B7vKVBF6f81eBTFN` | `/api/health` 200, `/api/auth/me` 401로 복구. 장애는 약 3분간 이어졌다 |
+| (이후) | DB URL 정규화 커밋 → 새 preview 검증 → production 반영 | 아래에 덧붙인다 |
+
+교훈: promote는 production 환경변수로 **다시 빌드**하므로, preview 검증 뒤에 환경변수가 바뀌면 검증하지 않은 값으로 배포된다. promote 직후에는 반드시 `/api/health`를 확인하고, 롤백할 배포 ID를 미리 적어 둔다.
 
 ## 7. 남은 일
 

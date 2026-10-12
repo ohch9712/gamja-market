@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,19 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=604800, gt=0)
     cookie_secure: bool = False
 
+
+    @field_validator("database_url", "migration_database_url")
+    @classmethod
+    def use_psycopg_driver(cls, value: str | None) -> str | None:
+        # Supabase 대시보드가 주는 드라이버 없는 URL(postgresql://, postgres://)은 SQLAlchemy가 psycopg2로 해석해
+        # import에 실패한다. 의존성에 있는 psycopg(v3) 드라이버로 맞춘다.
+        if value is None:
+            return None
+        value = value.strip()
+        for prefix in ("postgresql://", "postgres://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value.removeprefix(prefix)
+        return value
 
     @property
     def alembic_database_url(self) -> str:
