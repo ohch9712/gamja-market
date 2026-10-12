@@ -2,14 +2,18 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+export const TIMEOUT_ERROR_MESSAGE = "서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.";
 export const UNKNOWN_ERROR_MESSAGE = "잠시 후 다시 시도해 주세요.";
+
+// 응답 헤더가 이 시간 안에 오지 않으면 요청을 끊는다. 백엔드 cold start·DB 지연 중에도 화면이 무한 대기하지 않게 한다.
+export const REQUEST_TIMEOUT_MS = 10_000;
 
 export type ApiErrorDetail = { field: string; message: string };
 
 export class ApiError extends Error {
   constructor(
-    public status: number, // 네트워크 실패는 0
-    public code: string, // 서버 error.code 또는 "NETWORK_ERROR"
+    public status: number, // 네트워크 실패·타임아웃은 0
+    public code: string, // 서버 error.code, "NETWORK_ERROR" 또는 "TIMEOUT"
     message: string,
     public details: ApiErrorDetail[] = [],
   ) {
@@ -43,22 +47,42 @@ function toApiError(status: number, body: unknown): ApiError {
   return new ApiError(status, error.code, error.message, details);
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  if (typeof init?.body === "string" && !headers.has("Content-Type")) {
+export type ApiFetchInit = RequestInit & { timeoutMs?: number };
+
+export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...requestInit } = init;
+  const headers = new Headers(requestInit.headers);
+  if (typeof requestInit.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+
+  // 호출자의 signal과 타임아웃을 하나의 signal로 합친다. 호출자 취소는 AbortError 그대로 전달한다.
+  const controller = new AbortController();
+  const callerSignal = requestInit.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL.replace(/\/+$/, "")}${path}`, {
-      ...init,
+      ...requestInit,
       headers,
       credentials: "include",
+      signal: controller.signal,
     });
   } catch (error) {
+    if (timedOut) throw new ApiError(0, "TIMEOUT", TIMEOUT_ERROR_MESSAGE);
     if (isAbortError(error)) throw error;
     throw new ApiError(0, "NETWORK_ERROR", NETWORK_ERROR_MESSAGE);
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
   }
 
   if (!response.ok) {

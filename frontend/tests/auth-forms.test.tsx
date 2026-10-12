@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { SignupForm } from "@/features/auth/components/SignupForm";
 import { LoginForm } from "@/features/auth/components/LoginForm";
 import SignupPage from "@/app/signup/page";
 import LoginPage from "@/app/login/page";
+import { REQUEST_TIMEOUT_MS } from "@/lib/api-client";
 import {
   AuthStatusProbe,
   callsTo,
   errorResponse,
+  hangUntilAborted,
   jsonResponse,
   networkFailure,
   requestBody,
@@ -27,6 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -287,6 +290,20 @@ describe("LoginForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+  });
+
+  it("서버 응답이 타임아웃되면 폼 상단에 지연 안내를 보여 주고 다시 제출할 수 있다", async () => {
+    stubFetch({ "GET /api/auth/me": unauthenticatedResponse, "POST /api/auth/login": hangUntilAborted });
+    await renderWithAuth(<LoginForm />);
+    vi.useFakeTimers();
+    type("이메일", "potato@example.com");
+    type("비밀번호", "gamja1234");
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    expect(screen.getByRole("button", { name: "로그인 중…" })).toBeDisabled();
+
+    await act(() => vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS));
+    expect(screen.getByRole("alert")).toHaveTextContent("서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+    expect(screen.getByRole("button", { name: "로그인" })).toBeEnabled();
   });
 
   it("이미 로그인 상태면 /로 리다이렉트한다", async () => {
