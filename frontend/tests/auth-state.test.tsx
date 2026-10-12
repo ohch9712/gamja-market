@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
 import { Header } from "@/components/Header";
 import NewRequestPage from "@/app/requests/new/page";
+import { REQUEST_TIMEOUT_MS } from "@/lib/api-client";
 import {
   AuthStatusProbe,
   callsTo,
+  hangUntilAborted,
   jsonResponse,
   networkFailure,
   stubFetch,
@@ -26,6 +28,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -45,6 +48,16 @@ describe("AuthProvider", () => {
     stubFetch({ "GET /api/auth/me": networkFailure });
     renderHeader();
     await waitFor(() => expect(screen.getByTestId("auth-status")).toHaveTextContent("unauthenticated"));
+    expect(screen.getByTestId("auth-status")).toHaveAttribute("data-backend", "false");
+  });
+
+  it("getMe가 타임아웃되면 미로그인 + backendAvailable=false", async () => {
+    vi.useFakeTimers();
+    stubFetch({ "GET /api/auth/me": hangUntilAborted });
+    renderHeader();
+    expect(screen.getByTestId("auth-status")).toHaveTextContent("loading");
+    await act(() => vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS));
+    expect(screen.getByTestId("auth-status")).toHaveTextContent("unauthenticated");
     expect(screen.getByTestId("auth-status")).toHaveAttribute("data-backend", "false");
   });
 
@@ -74,13 +87,35 @@ describe("AuthProvider", () => {
 });
 
 describe("헤더 AuthMenu", () => {
-  it("loading: 로그인 영역을 비워 두고 구매요청 CTA는 보인다", () => {
+  it("loading: 응답을 기다리는 동안에도 로그인·회원가입 링크와 구매요청 CTA를 보여 준다", () => {
     stubFetch({ "GET /api/auth/me": never });
     renderHeader();
-    expect(screen.getByTestId("auth-menu-loading")).toBeEmptyDOMElement();
-    expect(screen.queryByRole("link", { name: "로그인" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("auth-status")).toHaveTextContent("loading");
+    expect(screen.getByRole("link", { name: "로그인" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "/signup");
     expect(screen.queryByRole("button", { name: "로그아웃" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /구매요청 올리기/ })).toHaveAttribute("href", "/requests/new");
+  });
+
+  it("loading 중 보이던 링크는 로그인 확인이 끝나면 이메일·로그아웃으로 바뀐다", async () => {
+    let resolveMe: (response: Response) => void = () => {};
+    stubFetch({ "GET /api/auth/me": () => new Promise<Response>((resolve) => { resolveMe = resolve; }) });
+    renderHeader();
+    expect(screen.getByRole("link", { name: "로그인" })).toBeInTheDocument();
+    resolveMe(meOk());
+    expect(await screen.findByText(testUser.email)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "로그아웃" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "로그인" })).not.toBeInTheDocument();
+  });
+
+  it("getMe가 타임아웃돼도 로그인·회원가입 링크를 유지한다", async () => {
+    vi.useFakeTimers();
+    stubFetch({ "GET /api/auth/me": hangUntilAborted });
+    renderHeader();
+    await act(() => vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS));
+    expect(screen.getByTestId("auth-status")).toHaveTextContent("unauthenticated");
+    expect(screen.getByRole("link", { name: "로그인" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "/signup");
   });
 
   it("unauthenticated: 로그인·회원가입 링크를 보여 준다", async () => {

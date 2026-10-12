@@ -11,7 +11,7 @@ export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 export interface AuthContextValue {
   status: AuthStatus;
   user: AuthUser | null;
-  backendAvailable: boolean; // getMe가 NETWORK_ERROR면 false
+  backendAvailable: boolean; // getMe가 NETWORK_ERROR·TIMEOUT이면 false
   signup(input: SignupInput): Promise<void>;
   login(credentials: Credentials): Promise<void>;
   logout(): Promise<void>;
@@ -40,8 +40,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       (error: unknown) => {
         if (!isCurrent()) return;
-        const networkError = error instanceof ApiError && error.code === "NETWORK_ERROR";
-        setState({ status: "unauthenticated", user: null, backendAvailable: !networkError });
+        // 확인에 실패하면(타임아웃 포함) 미로그인으로 보고 로그인·회원가입 진입점을 유지한다.
+        const unreachable = error instanceof ApiError && (error.code === "NETWORK_ERROR" || error.code === "TIMEOUT");
+        setState({ status: "unauthenticated", user: null, backendAvailable: !unreachable });
       },
     );
     return () => {

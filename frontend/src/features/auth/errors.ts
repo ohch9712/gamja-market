@@ -1,4 +1,4 @@
-import { ApiError, NETWORK_ERROR_MESSAGE, UNKNOWN_ERROR_MESSAGE } from "@/lib/api-client";
+import { ApiError, NETWORK_ERROR_MESSAGE, TIMEOUT_ERROR_MESSAGE, UNKNOWN_ERROR_MESSAGE } from "@/lib/api-client";
 
 export const authErrorMessages = {
   emailAlreadyExists: "이미 가입된 이메일입니다.",
@@ -25,6 +25,8 @@ export function toSubmitErrors<Field extends string>(
   switch (error.code) {
     case "NETWORK_ERROR":
       return { fieldErrors, formError: NETWORK_ERROR_MESSAGE };
+    case "TIMEOUT":
+      return { fieldErrors, formError: TIMEOUT_ERROR_MESSAGE };
     case "INVALID_CREDENTIALS":
       return { fieldErrors, formError: authErrorMessages.invalidCredentials };
     case "EMAIL_ALREADY_EXISTS": {

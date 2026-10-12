@@ -17,10 +17,6 @@ export function AuthMenu() {
     }
   }
 
-  if (status === "loading") {
-    return <div className="auth-menu auth-menu-placeholder" aria-hidden="true" data-testid="auth-menu-loading" />;
-  }
-
   if (status === "authenticated" && user) {
     return (
       <div className="auth-menu">
@@ -30,8 +26,9 @@ export function AuthMenu() {
     );
   }
 
+  // 로그인 상태 확인 중(loading)에도 진입점을 숨기지 않는다. 백엔드 응답이 늦어도 로그인·회원가입으로 갈 수 있어야 한다.
   return (
-    <div className="auth-menu">
+    <div className="auth-menu" aria-busy={status === "loading"} data-auth-status={status}>
       <Link href="/login" className="button button-text auth-link">로그인</Link>
       <Link href="/signup" className="button button-text auth-link">회원가입</Link>
     </div>
