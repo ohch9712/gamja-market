@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { API_BASE_URL, ApiError, apiFetch } from "@/lib/api-client";
+import { API_BASE_URL, ApiError, REQUEST_TIMEOUT_MS, apiFetch } from "@/lib/api-client";
 import { getMe, login, logout, signup } from "@/features/auth/api";
 import {
   callsTo,
   errorResponse,
+  hangUntilAborted,
   jsonResponse,
   networkFailure,
   requestBody,
@@ -13,6 +14,7 @@ import {
 } from "./helpers/auth";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -76,6 +78,43 @@ describe("apiFetch", () => {
       message: "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
     });
   });
+
+  it("응답이 REQUEST_TIMEOUT_MS 안에 오지 않으면 요청을 끊고 TIMEOUT(status 0)", async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubFetch({ "GET /api/auth/me": hangUntilAborted });
+    const pending = catchError(apiFetch("/api/auth/me"));
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    expect(await pending).toMatchObject({
+      status: 0,
+      code: "TIMEOUT",
+      message: "서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.",
+    });
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+
+  it("timeoutMs로 요청별 타임아웃을 바꿀 수 있다", async () => {
+    vi.useFakeTimers();
+    stubFetch({ "GET /api/auth/me": hangUntilAborted });
+    const pending = catchError(apiFetch("/api/auth/me", { timeoutMs: 1_000 }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ code: "TIMEOUT" });
+  });
+
+  it("호출자가 취소하면 TIMEOUT이 아니라 AbortError를 그대로 던진다", async () => {
+    stubFetch({ "GET /api/auth/me": hangUntilAborted });
+    const controller = new AbortController();
+    const pending = apiFetch("/api/auth/me", { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("응답이 오면 타이머를 정리해 이후에 abort하지 않는다", async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubFetch({ "GET /api/health": () => jsonResponse(200, { status: "ok" }) });
+    await expect(apiFetch("/api/health")).resolves.toEqual({ status: "ok" });
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(false);
+  });
 });
 
 describe("features/auth/api", () => {
@@ -108,7 +147,7 @@ describe("features/auth/api", () => {
     await expect(getMe()).resolves.toBeNull();
   });
 
-  it("getMe는 그 외 에러(NETWORK_ERROR 포함)를 던진다", async () => {
+  it("getMe는 그 외 에러(NETWORK_ERROR·TIMEOUT 포함)를 던진다", async () => {
     stubFetch({ "GET /api/auth/me": networkFailure });
     expect(await catchError(getMe())).toMatchObject({ code: "NETWORK_ERROR" });
     stubFetch({ "GET /api/auth/me": () => errorResponse(500, "INTERNAL_ERROR", "서버 오류") });

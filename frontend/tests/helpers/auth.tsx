@@ -26,6 +26,11 @@ export function errorResponse(
 
 export const unauthenticatedResponse = () => errorResponse(401, "UNAUTHENTICATED", "로그인이 필요합니다.");
 export const networkFailure = () => Promise.reject(new TypeError("Failed to fetch"));
+/** 응답하지 않다가 signal이 abort되면 실제 fetch처럼 AbortError로 끝나는 요청 */
+export const hangUntilAborted = (init?: RequestInit) =>
+  new Promise<Response>((_, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+  });
 
 type RouteHandler = (init?: RequestInit) => Response | Promise<Response>;
 export type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;

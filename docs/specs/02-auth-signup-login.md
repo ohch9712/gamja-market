@@ -421,7 +421,7 @@ export function useAuth(): AuthContextValue;
 
 | 상태 | 표시 |
 | --- | --- |
-| `loading` | 아무것도 표시하지 않음(레이아웃 흔들림 방지를 위해 고정 폭 빈 영역) |
+| `loading` | ~~아무것도 표시하지 않음(고정 폭 빈 영역)~~ → **04에서 변경**: `unauthenticated`와 같은 "로그인"/"회원가입" 링크를 표시한다([04-auth-entry-resilience.md](04-auth-entry-resilience.md)) |
 | `unauthenticated` | "로그인" 링크(`/login`), "회원가입" 링크(`/signup`) |
 | `authenticated` | 사용자 이메일 텍스트 + "로그아웃" 버튼 |
 
